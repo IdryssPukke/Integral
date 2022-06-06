@@ -1,3 +1,1 @@
-﻿  LINK : brak bazy danych programu D:\Szymon\Undo\c_Visual\CUDA\Project\Proj\x64\Debug\CudaRuntime1.pdb; zostanie wykonana pełna konsolidacja
-     Trwa tworzenie biblioteki D:\Szymon\Undo\c_Visual\CUDA\Project\Proj\x64\Debug\CudaRuntime1.lib i obiektu D:\Szymon\Undo\c_Visual\CUDA\Project\Proj\x64\Debug\CudaRuntime1.exp
-  CudaRuntime1.vcxproj -> D:\Szymon\Undo\c_Visual\CUDA\Project\Proj\x64\Debug\CudaRuntime1.exe
+﻿D:\Szymon\Undo\c_Visual\CUDA\Project\Proj\CudaRuntime1\CudaRuntime1.vcxproj(34,5): error MSB4019: The imported project "D:\Uzytkowe\VisualStudioCommunity\MSBuild\Microsoft\VC\v160\BuildCustomizations\CUDA 11.6.props" was not found. Confirm that the expression in the Import declaration "D:\Uzytkowe\VisualStudioCommunity\MSBuild\Microsoft\VC\v160\\BuildCustomizations\CUDA 11.6.props" is correct, and that the file exists on disk.

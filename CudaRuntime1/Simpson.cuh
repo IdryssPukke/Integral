@@ -8,8 +8,8 @@ extern "C"
 {
 #endif
 	state simpson_method(state a, state b, int steps);
-	__global__ void simpson_method_Kernel(state a, int steps, state step, state* results);
 	state simpson_method_CUDA(state a, state b, int steps);
+	state simpson_method_CUDA_red(state a, state b, int steps);
 
 #ifdef __cplusplus
 }

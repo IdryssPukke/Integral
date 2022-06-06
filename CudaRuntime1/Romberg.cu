@@ -7,6 +7,7 @@
 
 #include <cuda_runtime.h>
 #include <nvfunctional>
+#include "device_launch_parameters.h"
 
 #include "Romberg.cuh"
 #include "Parameters.cu"
@@ -16,8 +17,6 @@ using namespace std;
 extern __device__ __host__  state fun2(state x) {
 	//return sin(x);
 	return pow(exp(1.0), x);
-
-	//przygotowana tablica, która zwraca tab[x]
 }
 
 state romberg_method(state a, state b, int N) {
@@ -39,8 +38,6 @@ state romberg_method(state a, state b, int N) {
 	}
 	
 	r[1][1] = h[1] / 2 * (fun2(a) + fun2(b));
-
-	
 
 	for (int i = 2; i < N + 1; ++i) {
 		state coeff = 0;
@@ -155,22 +152,11 @@ __global__ void romberg_method_Kernel_2_2(state a, int i, state* h, state* coeff
 	coeff[idx] = fun2(a + (2 * idx - 1) * h[i]);
 }
 
-__global__ void romberg_method_Kernel_2_3(double* r, int Width) {
-
-	int idx = blockIdx.x;
-	int idy = threadIdx.x;
-
-	if (idy * Width + idx < Width * Width && idx>2) {
-			for (int j = 2; j <= Width; ++j) {
-				if (idy >= j) {
-					r[idy * Width + j] = threadIdx.x;//r[idy * Width + j - 1] + (r[idy * Width + j - 1] - r[(idy - 1) * Width + j - 1]) / (pow(4, j - 1) - 1);
-				}
-			}
-			__syncthreads();
-	}
-}
-
 state romberg_method_CUDA_2(state a, state b, int N) {
+
+		if (N > 8) {
+			N = 8;
+		}
 
 		state area = 0;
 
@@ -196,10 +182,18 @@ state romberg_method_CUDA_2(state a, state b, int N) {
 			r_h[i] = r_h[0] + i * Width; 
 		}
 
+		for (int i = 0; i < Width; i++) {
+			for (int k = 0; k < Width; k++) {
+				r_h[i][k] = 0;
+			}
+		}
+
 		cudaMalloc(&h_d, size);
 		cudaMemcpy(h_d, h_h, size, cudaMemcpyHostToDevice);
 		romberg_method_Kernel_2_1 <<< (Width + 1023) / 1024, 1024 >>> (a, b, h_d);
 		cudaMemcpy(h_h, h_d, size, cudaMemcpyDeviceToHost);
+
+		
 
 		r_h[1][1] = h_h[1] / 2 * (fun2(a) + fun2(b));
 
@@ -222,11 +216,6 @@ state romberg_method_CUDA_2(state a, state b, int N) {
 			}
 			r_h[i][1] = 0.5 * (r_h[i - 1][1] + h_h[i - 1] * coeff_sum);
 		}
-
-		//cudaMalloc(&r_d, size * size);
-		//cudaMemcpy(r_d, r_h[0], size * size, cudaMemcpyHostToDevice);
-		//romberg_method_Kernel_2_3 <<< Width, Width >>> (r_d, Width);
-		//cudaMemcpy(r_h[0], r_d, size * size, cudaMemcpyDeviceToHost);
 
 		for (int i = 2; i < Width; ++i) {
 			for (int j = 2; j <= i; ++j) {

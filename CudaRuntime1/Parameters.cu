@@ -12,6 +12,9 @@
 #include <chrono>
 #include <map>
 
+#define TPB 256
+
+
 using namespace std;
 
 /* Pozwala na szybk¹ zmianê pomiêdzy double oraz float
@@ -19,3 +22,5 @@ using namespace std;
 * float  - mniejsza dok³adnoœæ, szybsze dzia³anie
 */
 typedef double state;
+
+__device__ __host__ state funkcja(state x);

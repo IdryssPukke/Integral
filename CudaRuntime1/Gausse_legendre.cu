@@ -3,14 +3,17 @@
 #include <stdlib.h>
 #include <math.h>
 #include <float.h>
+
+#include <cuda_runtime.h>
+#include <nvfunctional>
+#include "device_launch_parameters.h"
+
 #include "Gausse_legendre.cuh"
 #include "Parameters.cu"
 
 extern __device__ __host__  state fun3(state x) {
 	//return sin(x);
 	return pow(exp(1.0), x);
-
-	//przygotowana tablica, która zwraca tab[x]
 }
 
 /*
@@ -70,7 +73,6 @@ state gauss_legendre_method(state a, state b, int n)
 			s += w[i] * (fun3(B + Ax) + fun3(B - Ax));
 		}
 	}
-
 
 	free(x);
 	free(w);
@@ -160,54 +162,147 @@ void gauss_legendre_tbl(int n, state* x, state* w, state eps)
 __global__ void gauss_legendre_method_Kernel(state A, state B, state* x, state* w, state*s) {
 	int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
-	//state Ax = 
-	//h[idx] = (b - a) / pow(2, idx - 1);
+	state Ax = A * x[idx];
+	s[idx] = w[idx] * (fun3(B + Ax) + fun3(B - Ax));
+}
+
+__device__ void warpReduce_gausse_legendre(volatile state* sdata, int tid) {
+	sdata[tid] += sdata[tid + 32];
+	sdata[tid] += sdata[tid + 16];
+	sdata[tid] += sdata[tid + 8];
+	sdata[tid] += sdata[tid + 4];
+	sdata[tid] += sdata[tid + 2];
+	sdata[tid] += sdata[tid + 1];
+}
+
+__global__ void reduce_gausse_legendre(state* g_idata, state* g_odata) {
+	extern __shared__ state sdata[TPB];
+	unsigned int tid = threadIdx.x;
+	unsigned int i = blockIdx.x * (blockDim.x * 2) + threadIdx.x;
+	sdata[tid] = g_idata[i] + g_idata[i + blockDim.x];
+	__syncthreads();
+
+	for (unsigned int s = blockDim.x / 2; s > 32; s >>= 1) {
+		if (tid < s) {
+			sdata[tid] += sdata[tid + s];
+			__syncthreads();
+		}
+	}
+	if (tid < 32) warpReduce_gausse_legendre(sdata, tid);
+	if (tid == 0) g_odata[blockIdx.x] = sdata[0];
 }
 
 
-state gauss_legendre_method_CUDA(state a, state b, int n)
+state gauss_legendre_method_CUDA(state a, state b, int steps)
 {
-	state* x = NULL;
-	state* w = NULL;
-	state A, B, Ax, s;
+	state A, B, s;
 	int i, m;
 
-	m = (n + 1) >> 1;
+	m = (steps + 1) >> 1;
 
-	x = (state*)malloc(m * sizeof(state));
-	w = (state*)malloc(m * sizeof(state));
+	size_t size = m * sizeof(state);
+	state* x_d = NULL;
+	state* w_d = NULL;
+	state* s_d = NULL;
 
-	gauss_legendre_tbl(n, x, w, 1e-10);
+	state* s_h = (state*)malloc(size);
+	state* x_h = (state*)malloc(size);
+	state* w_h = (state*)malloc(size);
+
+	cudaMalloc((void**)&x_d, size);
+	cudaMalloc((void**)&w_d, size);
+	cudaMalloc((void**)&s_d, size);
+
+	gauss_legendre_tbl(steps, x_h, w_h, 1e-10);
 
 	A = 0.5 * (b - a);
 	B = 0.5 * (b + a);
 
-	if (n & 1) /* n - odd */
+	cudaMemcpy(w_d, w_h, size, cudaMemcpyHostToDevice);
+	cudaMemcpy(x_d, x_h, size, cudaMemcpyHostToDevice);
+
+	if (steps & 1) /* n - odd */
 	{
-		s = w[0] * (fun3(B));
+		s = w_h[0] * (fun3(B));
 
-
-
+		gauss_legendre_method_Kernel <<< (steps + 1023) / 1024, 1024 >>> (A, B, x_d, w_d, s_d);
+		cudaMemcpy(s_h, s_d, size, cudaMemcpyDeviceToHost);
 		for (i = 1; i < m; i++)
 		{
-			Ax = A * x[i];
-			s += w[i] * (fun3(B + Ax) + fun3(B - Ax));
+			s += s_h[i];
 		}
 
 	}
 	else { /* n - even */
 
-		s = 0.0;
+		s = 0;
+		gauss_legendre_method_Kernel << < (steps + 1023) / 1024, 1024 >> > (A, B, x_d, w_d, s_d);
+		cudaMemcpy(s_h, s_d, size, cudaMemcpyDeviceToHost);
 		for (i = 0; i < m; i++)
 		{
-			Ax = A * x[i];
-			s += w[i] * (fun3(B + Ax) + fun3(B - Ax));
+			s += s_h[i];
 		}
 	}
 
+	free(x_h);
+	free(w_h);
+	free(s_h);
+	cudaFree(s_d); cudaFree(x_d); cudaFree(w_d);
 
-	free(x);
-	free(w);
+	return A * s;
+}
+
+state gauss_legendre_method_CUDA_red(state a, state b, int steps)
+{
+	state A, B, s;
+	int m;
+
+	m = (steps + 1) >> 1;
+	size_t size = m * sizeof(state);
+	state* x_d = NULL;
+	state* w_d = NULL;
+	state* s_d = NULL;
+
+	state* s_h = (state*)malloc(size);
+	state* x_h = (state*)malloc(size);
+	state* w_h = (state*)malloc(size);
+
+	cudaMalloc((void**)&x_d, size);
+	cudaMalloc((void**)&w_d, size);
+	cudaMalloc((void**)&s_d, size);
+
+	gauss_legendre_tbl(steps, x_h, w_h, 1e-10);
+
+	A = 0.5 * (b - a);
+	B = 0.5 * (b + a);
+
+	cudaMemcpy(w_d, w_h, size, cudaMemcpyHostToDevice);
+	cudaMemcpy(x_d, x_h, size, cudaMemcpyHostToDevice);
+
+	if (steps & 1) /* n - odd */
+	{
+		s = w_h[0] * (fun3(B));
+
+		gauss_legendre_method_Kernel <<< (steps + 1023) / 1024, 1024 >>> (A, B, x_d, w_d, s_d);
+
+		cudaMemset(s_d, 0, sizeof(state));
+		reduce_gausse_legendre <<< (int)(steps / pow(TPB, 1))+1, TPB / 2 >>> (s_d, s_d);
+		cudaMemcpy(s_h, s_d, sizeof(state), cudaMemcpyDeviceToHost);
+
+		s += s_h[0];
+	}
+	else { /* n - even */
+
+		gauss_legendre_method_Kernel << < (steps + 1023) / 1024, 1024 >> > (A, B, x_d, w_d, s_d);
+		reduce_gausse_legendre <<< (int)(steps / pow(TPB, 1)) + 1, TPB / 2 >>> (s_d, s_d);
+		cudaMemcpy(s_h, s_d, sizeof(state), cudaMemcpyDeviceToHost);
+		s = s_h[0];
+	}
+
+	free(x_h);
+	free(w_h);
+	free(s_h);
+	cudaFree(s_d); cudaFree(x_d); cudaFree(w_d);
 
 	return A * s;
 }

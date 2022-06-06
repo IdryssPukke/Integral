@@ -8,8 +8,9 @@ extern "C"
 {
 #endif
 	state rectangle_method(state a, state b, int n);
-	__global__ void rectangle_method_Kernel(state a, state* results, state step);
 	state rectangle_method_CUDA(state a, state b, int steps);
+	state rectangle_method_CUDA_red(state a, state b, int steps);
+	state rectangle_method_CUDA_red2(state a, state b, int steps);
 
 #ifdef __cplusplus
 }
